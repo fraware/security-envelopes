@@ -1,6 +1,5 @@
 # Security Envelopes
 
-[![CI](https://github.com/security-envelopes/actions/workflows/ci.yml/badge.svg)](https://github.com/security-envelopes/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Lean](https://img.shields.io/badge/Lean-4.0+-blue.svg)](https://leanprover.github.io/)
 [![Rust](https://img.shields.io/badge/Rust-1.70+-orange.svg)](https://www.rust-lang.org/)
