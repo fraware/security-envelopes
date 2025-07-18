@@ -1,0 +1,625 @@
+name: Security Envelopes CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+  release:
+    types: [published]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  # Build stage - compile all components
+  build:
+    name: Build
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, macos-14, windows-2025]
+        rust: [1.70, stable, nightly]
+        exclude:
+          - os: windows-2025
+            rust: nightly
+          - os: macos-14
+            rust: nightly
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: ${{ matrix.rust }}
+          override: true
+          components: rustfmt, clippy
+
+      - name: Install Lean
+        run: |
+          curl https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh -sSf | sh
+          echo "$HOME/.elan/bin" >> $GITHUB_PATH
+
+      - name: Install Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.9"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Cache Rust dependencies
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Cache Lean dependencies
+        uses: actions/cache@v3
+        with:
+          path: |
+            .lake
+            lake-manifest.json
+          key: ${{ runner.os }}-lean-${{ hashFiles('lakefile.lean') }}
+          restore-keys: |
+            ${{ runner.os }}-lean-
+
+      - name: Build Lean specifications
+        run: |
+          lake build
+          lake test
+
+      - name: Build Rust components
+        run: |
+          cargo build --verbose
+          cargo build --verbose --release
+
+      - name: Build WASM modules
+        run: |
+          cargo build --target wasm32-wasi --release
+          cargo build --target wasm32-unknown-unknown --release
+
+      - name: Run Lean proofs
+        run: |
+          lake run test
+          lake run bench
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: build-${{ matrix.os }}-${{ matrix.rust }}
+          path: |
+            target/release/
+            target/wasm32-wasi/release/
+            target/wasm32-unknown-unknown/release/
+
+  # Test stage - run all test suites
+  test:
+    name: Test
+    runs-on: ${{ matrix.os }}
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, macos-14, windows-2025]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+
+      - name: Install Lean
+        run: |
+          curl https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh -sSf | sh
+          echo "$HOME/.elan/bin" >> $GITHUB_PATH
+
+      - name: Install Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.9"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: build-${{ matrix.os }}-stable
+
+      - name: Run Rust tests
+        run: |
+          cargo test --verbose
+          cargo test --verbose --release
+
+      - name: Run Lean tests
+        run: |
+          lake test
+          lake test RBAC
+          lake test Tenant
+          lake test Attest
+
+      - name: Run Python tests
+        run: |
+          pytest tests/ -v --cov=bundle --cov-report=xml
+
+      - name: Run integration tests
+        run: |
+          cargo test --test integration --verbose
+
+      - name: Run OWASP test suite
+        run: |
+          # Run OWASP access control test suite
+          cargo test --test owasp_tests --verbose
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v3
+        with:
+          name: test-results-${{ matrix.os }}
+          path: |
+            target/test-results/
+            coverage.xml
+
+  # Proof stage - verify formal proofs
+  proof:
+    name: Formal Proofs
+    runs-on: ubuntu-22.04
+    needs: build
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Lean
+        run: |
+          curl https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh -sSf | sh
+          echo "$HOME/.elan/bin" >> $GITHUB_PATH
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: build-ubuntu-22.04-stable
+
+      - name: Verify RBAC proofs
+        run: |
+          lake build RBAC
+          lake test RBAC.Proofs
+          # Verify soundness and completeness proofs
+          lake exe test_rbac
+
+      - name: Verify tenant isolation proofs
+        run: |
+          lake build Tenant
+          lake test Tenant.Isolation
+          # Verify non-interference proofs
+          lake exe test_tenant
+
+      - name: Verify attestation proofs
+        run: |
+          lake build Attest
+          lake test Attest.Quote
+          # Verify quote verification proofs
+          lake exe test_attest
+
+      - name: Run formal verification benchmarks
+        run: |
+          lake run bench
+          # Ensure proofs compile in < 3s
+          timeout 3s lake build RBAC || exit 1
+
+      - name: Upload proof results
+        uses: actions/upload-artifact@v3
+        with:
+          name: proof-results
+          path: |
+            .lake/build/
+            proof-reports/
+
+  # Fuzz stage - continuous fuzzing
+  fuzz:
+    name: Fuzzing
+    runs-on: ubuntu-22.04
+    needs: build
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+
+      - name: Install AFL++
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y afl++
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: build-ubuntu-22.04-stable
+
+      - name: Run AFL++ fuzzing on WASM hostcalls
+        run: |
+          # Fuzz WASM policy evaluation
+          cargo afl build --bin policyengine-fuzz
+          timeout 300s cargo afl fuzz -i fuzz/corpus -o fuzz/output target/debug/policyengine-fuzz
+
+      - name: Run property-based tests
+        run: |
+          cargo test --test property_tests --verbose
+
+      - name: Run Miri tests
+        run: |
+          cargo +nightly miri test --verbose
+
+      - name: Upload fuzz results
+        uses: actions/upload-artifact@v3
+        with:
+          name: fuzz-results
+          path: |
+            fuzz/output/
+            target/miri/
+
+  # Benchmark stage - performance testing
+  bench:
+    name: Benchmarks
+    runs-on: ubuntu-22.04
+    needs: build
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: build-ubuntu-22.04-stable
+
+      - name: Run RBAC benchmarks
+        run: |
+          cargo bench --bench rbac_bench
+          # Ensure 1000 req/s/t throughput
+          cargo run --bin bench_rbac -- --target 1000
+
+      - name: Run attestation benchmarks
+        run: |
+          cargo bench --bench attest_bench
+          # Ensure quote verification meets targets
+          cargo run --bin bench_attest -- --target 10000
+
+      - name: Run WASM overhead benchmarks
+        run: |
+          cargo bench --bench wasm_overhead
+          # Ensure < 25µs overhead @10k rps
+          cargo run --bin bench_wasm_overhead -- --target 25
+
+      - name: Generate benchmark reports
+        run: |
+          cargo bench --bench all -- --verbose
+          cargo run --bin generate_benchmark_report
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v3
+        with:
+          name: benchmark-results
+          path: |
+            target/criterion/
+            benchmark-reports/
+
+  # Security stage - security scanning
+  security:
+    name: Security Scan
+    runs-on: ubuntu-22.04
+    needs: build
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: build-ubuntu-22.04-stable
+
+      - name: Run cargo audit
+        run: |
+          cargo install cargo-audit
+          cargo audit
+
+      - name: Run cargo deny
+        run: |
+          cargo install cargo-deny
+          cargo deny check
+
+      - name: Run semgrep
+        uses: returntocorp/semgrep-action@v1
+        with:
+          config: >-
+            p/security-audit
+            p/secrets
+            p/owasp-top-ten
+
+      - name: Run CodeQL analysis
+        uses: github/codeql-action/init@v2
+        with:
+          languages: rust, python
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v2
+
+      - name: Upload security results
+        uses: actions/upload-artifact@v3
+        with:
+          name: security-results
+          path: |
+            semgrep-results/
+            codeql-results/
+
+  # Docker E2E stage - end-to-end testing
+  docker-e2e:
+    name: Docker E2E
+    runs-on: ubuntu-22.04
+    needs: [build, test, proof, fuzz, bench, security]
+
+    services:
+      docker:
+        image: docker:24.0.5
+        options: >-
+          --health-cmd "docker info"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: build-ubuntu-22.04-stable
+
+      - name: Build Docker images
+        run: |
+          docker build -t security-envelopes:latest .
+          docker build -f Dockerfile.sgx -t security-envelopes:sgx .
+          docker build -f Dockerfile.sev -t security-envelopes:sev .
+
+      - name: Run Docker E2E tests
+        run: |
+          # Test basic functionality
+          docker run --rm security-envelopes:latest cargo test --test e2e
+
+          # Test SGX enclave
+          docker run --rm --device=/dev/sgx_enclave security-envelopes:sgx cargo test --test sgx_e2e
+
+          # Test SEV enclave
+          docker run --rm security-envelopes:sev cargo test --test sev_e2e
+
+      - name: Run Jepsen chaos tests
+        run: |
+          # Start multi-tenant isolation chaos tests
+          docker-compose -f docker-compose.jepsen.yml up -d
+          sleep 300  # Run for 5 minutes
+          docker-compose -f docker-compose.jepsen.yml down
+
+      - name: Upload E2E results
+        uses: actions/upload-artifact@v3
+        with:
+          name: e2e-results
+          path: |
+            e2e-test-results/
+            jepsen-results/
+
+  # Compliance stage - generate compliance bundles
+  compliance:
+    name: Compliance Bundle
+    runs-on: ubuntu-22.04
+    needs: [build, test, proof, fuzz, bench, security, docker-e2e]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.9"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v3
+        with:
+          path: artifacts/
+
+      - name: Generate compliance bundle
+        run: |
+          python bundle/gen.py \
+            --spec-dir Spec/ \
+            --wasm-dir artifacts/build-ubuntu-22.04-stable/target/wasm32-wasi/release/ \
+            --proof-dir artifacts/proof-results/ \
+            --test-results artifacts/test-results-ubuntu-22.04/ \
+            --benchmark-results artifacts/benchmark-results/ \
+            --security-results artifacts/security-results/ \
+            --output compliance-bundle.zip
+
+      - name: Validate compliance bundle
+        run: |
+          # Verify bundle structure
+          unzip -l compliance-bundle.zip
+          # Verify PDF generation
+          python -c "import fitz; fitz.open('compliance-bundle.zip')"
+          # Verify manifest
+          python bundle/validate_manifest.py compliance-bundle.zip
+
+      - name: Upload compliance bundle
+        uses: actions/upload-artifact@v3
+        with:
+          name: compliance-bundle
+          path: compliance-bundle.zip
+
+  # Release stage - create releases
+  release:
+    name: Release
+    runs-on: ubuntu-22.04
+    needs: [build, test, proof, fuzz, bench, security, docker-e2e, compliance]
+    if: github.event_name == 'release'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download compliance bundle
+        uses: actions/download-artifact@v3
+        with:
+          name: compliance-bundle
+
+      - name: Create release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: Release ${{ github.ref }}
+          body: |
+            ## Security Envelopes Release
+
+            This release includes:
+            - Formally verified RBAC/ABAC engine
+            - Multi-tenant isolation guarantees
+            - Remote attestation for SGX/SEV
+            - Compliance bundle with audit trail
+
+            ### Verification Results
+            - ✅ All formal proofs verified
+            - ✅ OWASP test suite: 100% pass
+            - ✅ Performance targets met
+            - ✅ Security scan: clean
+            - ✅ E2E tests: passed
+
+            ### Compliance Bundle
+            The attached compliance bundle contains:
+            - Formal specifications (Lean)
+            - Policy WASM modules
+            - Proof certificates
+            - Test results
+            - Security audit report
+            - Performance benchmarks
+          draft: false
+          prerelease: false
+
+      - name: Upload release assets
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./compliance-bundle.zip
+          asset_name: compliance-bundle.zip
+          asset_content_type: application/zip
+
+      - name: Upload policy engine binary
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./target/release/policyengine
+          asset_name: policyengine
+          asset_content_type: application/octet-stream
+
+      - name: Upload WASM modules
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./target/wasm32-wasi/release/*.wasm
+          asset_name: policy-modules.wasm
+          asset_content_type: application/wasm
+
+  # Status check - ensure all stages passed
+  status:
+    name: Status Check
+    runs-on: ubuntu-22.04
+    needs: [build, test, proof, fuzz, bench, security, docker-e2e, compliance]
+    if: always()
+
+    steps:
+      - name: Check all jobs completed
+        run: |
+          if [[ "${{ needs.build.result }}" != "success" ]]; then
+            echo "❌ Build failed"
+            exit 1
+          fi
+          if [[ "${{ needs.test.result }}" != "success" ]]; then
+            echo "❌ Tests failed"
+            exit 1
+          fi
+          if [[ "${{ needs.proof.result }}" != "success" ]]; then
+            echo "❌ Proofs failed"
+            exit 1
+          fi
+          if [[ "${{ needs.fuzz.result }}" != "success" ]]; then
+            echo "❌ Fuzzing failed"
+            exit 1
+          fi
+          if [[ "${{ needs.bench.result }}" != "success" ]]; then
+            echo "❌ Benchmarks failed"
+            exit 1
+          fi
+          if [[ "${{ needs.security.result }}" != "success" ]]; then
+            echo "❌ Security scan failed"
+            exit 1
+          fi
+          if [[ "${{ needs.docker-e2e.result }}" != "success" ]]; then
+            echo "❌ E2E tests failed"
+            exit 1
+          fi
+          if [[ "${{ needs.compliance.result }}" != "success" ]]; then
+            echo "❌ Compliance bundle failed"
+            exit 1
+          fi
+          echo "✅ All stages completed successfully"

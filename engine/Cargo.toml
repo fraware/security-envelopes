@@ -1,0 +1,98 @@
+[package]
+name = "policyengine"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+description.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+# Core dependencies
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+anyhow.workspace = true
+
+# WASM runtime
+wasmtime.workspace = true
+wasmtime-wasi.workspace = true
+
+# Cryptography
+ring.workspace = true
+ed25519-dalek.workspace = true
+sha2.workspace = true
+
+# Async runtime
+tokio.workspace = true
+
+# HTTP/gRPC support
+axum.workspace = true
+tonic.workspace = true
+prost.workspace = true
+
+# NATS support
+nats.workspace = true
+
+# Logging
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+# Configuration
+config.workspace = true
+
+# CLI
+clap.workspace = true
+
+# YAML
+serde_yaml.workspace = true
+
+# Hex encoding
+hex.workspace = true
+
+# Bincode
+bincode.workspace = true
+
+# Testing
+criterion.workspace = true
+
+[dev-dependencies]
+tokio-test.workspace = true
+mockall.workspace = true
+
+[features]
+default = ["sgx", "sev"]
+sgx = ["sgx-tstd"]
+sev = ["sev-guest"]
+bench = []
+
+[lib]
+name = "policyengine"
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "policyengine-server"
+path = "src/bin/server.rs"
+
+[[bin]]
+name = "rbac-gen"
+path = "src/bin/rbac_gen.rs"
+
+[[bin]]
+name = "attest-verify"
+path = "src/bin/attest_verify.rs"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+
+[profile.dev]
+opt-level = 0
+debug = true
+
+[workspace]
+members = ["."] 

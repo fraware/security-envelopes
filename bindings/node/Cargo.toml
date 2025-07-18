@@ -1,0 +1,35 @@
+[package]
+name = "policyengine-node"
+version = "0.1.0"
+edition = "2021"
+authors = ["Security Envelopes Team"]
+description = "Node.js bindings for Security Envelopes PolicyEngine"
+license = "MIT"
+repository = "https://github.com/security-envelopes/security-envelopes"
+keywords = ["security", "rbac", "abac", "policy", "wasm", "attestation"]
+categories = ["security", "web-programming"]
+
+[lib]
+name = "policyengine_node"
+crate-type = ["cdylib"]
+
+[dependencies]
+neon = "0.10"
+policyengine = { path = "../../engine" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1.0", features = ["full"] }
+anyhow = "1.0"
+
+[dev-dependencies]
+tokio-test = "0.4"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+
+[profile.dev]
+opt-level = 0
+debug = true 

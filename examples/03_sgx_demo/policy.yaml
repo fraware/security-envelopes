@@ -1,0 +1,245 @@
+# SGX Demo Policy for Enarx Deployment
+# This policy demonstrates SGX enclave deployment with runtime-safety-kernels
+# and PolicyEngine integration for secure LLM inference
+
+metadata:
+  name: "sgx-llm-demo"
+  version: "1.0.0"
+  description: "SGX enclave demo with GPT-2 inference and PolicyEngine"
+  author: "Security Envelopes Team"
+  created: "2024-01-01T00:00:00Z"
+  enclave_type: "intel-sgx"
+  runtime: "enarx"
+
+# Enclave configuration
+enclave:
+  name: "gpt2-inference-enclave"
+  type: "intel-sgx"
+  memory_size: "2GB"
+  thread_count: 4
+  attestation:
+    provider: "intel-dcap"
+    quote_type: "linkable"
+    verification_required: true
+  security:
+    encryption: "aes-256-gcm"
+    key_derivation: "hkdf-sha256"
+    secure_boot: true
+    memory_protection: true
+
+# Runtime Safety Kernels integration
+runtime_safety:
+  enabled: true
+  kernel_type: "runtime-safety-kernels"
+  features:
+    - "memory_safety"
+    - "control_flow_integrity"
+    - "stack_protection"
+    - "heap_protection"
+    - "pointer_integrity"
+  policy_engine:
+    integration: "policyengine-wasm"
+    wasm_module: "sgx_policy.wasm"
+    verification_required: true
+
+# LLM Model configuration
+model:
+  name: "gpt-2-medium"
+  version: "1.0"
+  size: "355MB"
+  parameters: 355000000
+  max_sequence_length: 1024
+  quantization: "int8"
+  encryption:
+    model_encryption: true
+    key_management: "enclave-sealed"
+    attestation_required: true
+
+# Access control for LLM inference
+access_control:
+  roles:
+    - name: "llm-user"
+      description: "User with permission to perform LLM inference"
+      permissions:
+        - resource: "model/gpt-2-medium"
+          actions: ["inference", "read"]
+          conditions:
+            - attribute: "user_quota"
+              operator: "greater_than"
+              value: 0
+            - attribute: "content_filter"
+              operator: "equals"
+              value: "passed"
+            - attribute: "rate_limit"
+              operator: "less_than"
+              value: "${user.rate_limit}"
+
+    - name: "llm-admin"
+      description: "Administrator with full model access"
+      permissions:
+        - resource: "model/*"
+          actions: ["*"]
+        - resource: "enclave/*"
+          actions: ["read", "monitor"]
+        - resource: "attestation/*"
+          actions: ["read", "verify"]
+
+    - name: "attestation-verifier"
+      description: "Role for verifying enclave attestation"
+      permissions:
+        - resource: "attestation/quote"
+          actions: ["read", "verify"]
+        - resource: "attestation/report"
+          actions: ["read", "validate"]
+
+# Content filtering and safety
+content_safety:
+  enabled: true
+  filters:
+    - name: "toxicity"
+      threshold: 0.7
+      action: "block"
+    - name: "violence"
+      threshold: 0.8
+      action: "block"
+    - name: "hate_speech"
+      threshold: 0.6
+      action: "block"
+    - name: "sexual_content"
+      threshold: 0.7
+      action: "block"
+  moderation:
+    pre_inference: true
+    post_inference: true
+    logging: true
+
+# Rate limiting and quotas
+rate_limiting:
+  user_quota:
+    requests_per_minute: 60
+    requests_per_hour: 1000
+    requests_per_day: 10000
+    tokens_per_request: 1000
+  burst_allowance:
+    requests: 10
+    tokens: 2000
+  throttling:
+    enabled: true
+    strategy: "token_bucket"
+
+# Attestation verification
+attestation:
+  intel_sgx:
+    enabled: true
+    quote_verification: true
+    report_verification: true
+    measurement_validation: true
+    policy_verification: true
+  verification_chain:
+    - step: "quote_verification"
+      timeout: "10ms"
+      required: true
+    - step: "measurement_validation"
+      timeout: "5ms"
+      required: true
+    - step: "policy_verification"
+      timeout: "5ms"
+      required: true
+    - step: "runtime_verification"
+      timeout: "5ms"
+      required: true
+
+# Monitoring and observability
+monitoring:
+  metrics:
+    - name: "inference_latency"
+      type: "histogram"
+      description: "LLM inference latency"
+      buckets: [0.1, 0.5, 1.0, 2.0, 5.0, 10.0]
+
+    - name: "attestation_success_rate"
+      type: "gauge"
+      description: "Attestation verification success rate"
+
+    - name: "content_filter_violations"
+      type: "counter"
+      description: "Content filter violations"
+
+    - name: "rate_limit_exceeded"
+      type: "counter"
+      description: "Rate limit exceeded events"
+
+  alerts:
+    - name: "attestation_failure"
+      condition: "attestation_success_rate < 0.99"
+      severity: "critical"
+      action: "shutdown_enclave"
+
+    - name: "high_latency"
+      condition: "inference_latency_p95 > 5s"
+      severity: "warning"
+      action: "throttle_requests"
+
+    - name: "content_violation"
+      condition: "content_filter_violations > 10"
+      severity: "warning"
+      action: "increase_filtering"
+
+# Performance targets
+performance:
+  inference_latency:
+    p50: "< 1s"
+    p95: "< 3s"
+    p99: "< 5s"
+  throughput:
+    requests_per_second: "> 10"
+    tokens_per_second: "> 1000"
+  attestation:
+    quote_verification: "< 10ms"
+    measurement_validation: "< 5ms"
+    policy_verification: "< 5ms"
+
+# Security requirements
+security:
+  encryption:
+    model_encryption: true
+    input_encryption: true
+    output_encryption: true
+    key_rotation: "7d"
+  isolation:
+    memory_isolation: true
+    process_isolation: true
+    network_isolation: true
+  audit:
+    logging: true
+    tamper_proof: true
+    retention: "1y"
+
+# Deployment configuration
+deployment:
+  platform: "enarx"
+  container:
+    base_image: "enarx/enarx:latest"
+    sgx_driver: "intel-sgx-dcap"
+  resources:
+    cpu: "4 cores"
+    memory: "4GB"
+    storage: "10GB"
+  scaling:
+    min_replicas: 1
+    max_replicas: 10
+    target_cpu_utilization: 70
+
+# Integration points
+integrations:
+  policy_engine:
+    endpoint: "http://localhost:8080"
+    timeout: "5s"
+    retries: 3
+  attestation_service:
+    endpoint: "https://attestation.intel.com"
+    timeout: "10s"
+    retries: 3
+  monitoring:
+    prometheus: "http://localhost:9090"
+    jaeger: "http://localhost:16686" 

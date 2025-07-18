@@ -1,0 +1,85 @@
+# Security Envelopes SGX Docker Image
+# Intel SGX-enabled build for enclave execution
+
+# Stage 1: SGX build environment
+FROM intel/intel-sgx-aesm:latest as sgx-builder
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    cmake \
+    pkg-config \
+    libssl-dev \
+    curl \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Rust with SGX target
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+ENV PATH="/root/.cargo/bin:$PATH"
+
+# Install SGX Rust dependencies
+RUN rustup target add x86_64-fortanix-unknown-sgx
+RUN cargo install fortanix-sgx-tools
+
+# Install Lean
+RUN curl https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh -sSf | sh -s -- -y
+ENV PATH="/root/.elan/bin:$PATH"
+
+# Copy source code
+WORKDIR /app
+COPY . .
+
+# Build Lean specifications
+RUN lake build
+
+# Build SGX enclave
+RUN cargo build --target x86_64-fortanix-unknown-sgx --release
+
+# Stage 2: SGX runtime
+FROM intel/intel-sgx-aesm:latest
+
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create non-root user
+RUN addgroup -g 1001 -S appgroup && \
+    adduser -u 1001 -S appuser -G appgroup
+
+# Copy SGX enclave
+COPY --from=sgx-builder /app/target/x86_64-fortanix-unknown-sgx/release/policyengine.sgxs /usr/local/bin/
+COPY --from=sgx-builder /app/target/x86_64-fortanix-unknown-sgx/release/policyengine.sig /usr/local/bin/
+
+# Copy SGX launcher
+COPY --from=sgx-builder /app/target/x86_64-fortanix-unknown-sgx/release/policyengine /usr/local/bin/
+
+# Copy WASM modules
+COPY --from=sgx-builder /app/target/wasm32-wasi/release/*.wasm /usr/local/lib/policyengine/
+
+# Copy specifications
+COPY --from=sgx-builder /app/Spec /usr/local/share/security-envelopes/Spec
+
+# Set ownership
+RUN chown -R appuser:appgroup /usr/local/bin /usr/local/lib /usr/local/share
+
+# Switch to non-root user
+USER appuser
+
+# Set environment variables
+ENV POLICYENGINE_LOG_LEVEL=info
+ENV POLICYENGINE_WASM_PATH=/usr/local/lib/policyengine
+ENV POLICYENGINE_SPEC_PATH=/usr/local/share/security-envelopes/Spec
+ENV SGX_MODE=HW
+
+# Expose port
+EXPOSE 8080
+
+# Health check for SGX
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:8080/health || exit 1
+
+# Default command with SGX launcher
+CMD ["ftxsgx-runner", "policyengine.sgxs"] 

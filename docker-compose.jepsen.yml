@@ -1,0 +1,130 @@
+version: "3.8"
+
+services:
+  # Jepsen control node
+  jepsen-control:
+    image: jepsen/jepsen:latest
+    container_name: jepsen-control
+    hostname: jepsen-control
+    environment:
+      - SSH_AUTH_SOCK=/ssh-agent
+    volumes:
+      - ~/.ssh:/root/.ssh:ro
+      - ./jepsen-results:/jepsen-results
+      - ./jepsen-tests:/jepsen-tests
+    working_dir: /jepsen
+    command: tail -f /dev/null
+    networks:
+      - jepsen-net
+
+  # Security Envelopes nodes for testing
+  se-node1:
+    image: security-envelopes:latest
+    container_name: se-node1
+    hostname: se-node1
+    ports:
+      - "8081:8080"
+    environment:
+      - POLICYENGINE_LOG_LEVEL=info
+      - POLICYENGINE_TENANT_MODE=multi
+    volumes:
+      - ./examples/02_multi_tenant:/app/examples
+    networks:
+      - jepsen-net
+    depends_on:
+      - redis
+
+  se-node2:
+    image: security-envelopes:latest
+    container_name: se-node2
+    hostname: se-node2
+    ports:
+      - "8082:8080"
+    environment:
+      - POLICYENGINE_LOG_LEVEL=info
+      - POLICYENGINE_TENANT_MODE=multi
+    volumes:
+      - ./examples/02_multi_tenant:/app/examples
+    networks:
+      - jepsen-net
+    depends_on:
+      - redis
+
+  se-node3:
+    image: security-envelopes:latest
+    container_name: se-node3
+    hostname: se-node3
+    ports:
+      - "8083:8080"
+    environment:
+      - POLICYENGINE_LOG_LEVEL=info
+      - POLICYENGINE_TENANT_MODE=multi
+    volumes:
+      - ./examples/02_multi_tenant:/app/examples
+    networks:
+      - jepsen-net
+    depends_on:
+      - redis
+
+  se-node4:
+    image: security-envelopes:latest
+    container_name: se-node4
+    hostname: se-node4
+    ports:
+      - "8084:8080"
+    environment:
+      - POLICYENGINE_LOG_LEVEL=info
+      - POLICYENGINE_TENANT_MODE=multi
+    volumes:
+      - ./examples/02_multi_tenant:/app/examples
+    networks:
+      - jepsen-net
+    depends_on:
+      - redis
+
+  se-node5:
+    image: security-envelopes:latest
+    container_name: se-node5
+    hostname: se-node5
+    ports:
+      - "8085:8080"
+    environment:
+      - POLICYENGINE_LOG_LEVEL=info
+      - POLICYENGINE_TENANT_MODE=multi
+    volumes:
+      - ./examples/02_multi_tenant:/app/examples
+    networks:
+      - jepsen-net
+    depends_on:
+      - redis
+
+  # Redis for shared state
+  redis:
+    image: redis:7-alpine
+    container_name: jepsen-redis
+    hostname: jepsen-redis
+    ports:
+      - "6379:6379"
+    networks:
+      - jepsen-net
+    command: redis-server --appendonly yes
+
+  # Chaos monkey for network partitions
+  chaos-monkey:
+    image: alpine:latest
+    container_name: chaos-monkey
+    hostname: chaos-monkey
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./chaos-scripts:/chaos-scripts
+    working_dir: /chaos-scripts
+    networks:
+      - jepsen-net
+    command: tail -f /dev/null
+
+networks:
+  jepsen-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

@@ -1,0 +1,63 @@
+{
+  "name": "@security-envelopes/policyengine",
+  "version": "0.1.0",
+  "description": "Node.js bindings for Security Envelopes PolicyEngine",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "scripts": {
+    "build": "neon build --release",
+    "build:debug": "neon build",
+    "install": "neon build --release",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "lint": "eslint src/",
+    "lint:fix": "eslint src/ --fix",
+    "clean": "rm -rf lib/ target/",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "security",
+    "rbac",
+    "abac",
+    "policy",
+    "wasm",
+    "attestation",
+    "sgx",
+    "sev"
+  ],
+  "author": "Security Envelopes Team",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/security-envelopes/security-envelopes.git"
+  },
+  "bugs": {
+    "url": "https://github.com/security-envelopes/security-envelopes/issues"
+  },
+  "homepage": "https://github.com/security-envelopes/security-envelopes#readme",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "neon": "^0.10.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@typescript-eslint/eslint-plugin": "^6.0.0",
+    "@typescript-eslint/parser": "^6.0.0",
+    "eslint": "^8.0.0",
+    "jest": "^29.0.0",
+    "typescript": "^5.0.0"
+  },
+  "files": [
+    "lib/",
+    "native/",
+    "README.md",
+    "LICENSE"
+  ],
+  "neon": {
+    "cargo": {
+      "name": "policyengine-node"
+    }
+  }
+} 

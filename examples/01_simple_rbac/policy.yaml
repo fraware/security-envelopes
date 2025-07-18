@@ -1,0 +1,70 @@
+version: "1.0"
+metadata:
+  name: "Simple RBAC Policy"
+  description: "Example RBAC policy for microservice with three roles"
+  author: "Security Envelopes Team"
+  created: "2024-01-01T00:00:00Z"
+
+roles:
+  - name: "admin"
+    permissions:
+      - action: "allow"
+        scope:
+          resource: "*"
+          path: ["*"]
+      - action: "allow"
+        scope:
+          action: "*"
+          params: ["*"]
+
+  - name: "user"
+    permissions:
+      - action: "allow"
+        scope:
+          resource: "user_data"
+          path: ["read", "write"]
+      - action: "allow"
+        scope:
+          resource: "public_data"
+          path: ["read"]
+      - action: "deny"
+        scope:
+          resource: "admin_data"
+          path: ["*"]
+
+  - name: "guest"
+    permissions:
+      - action: "allow"
+        scope:
+          resource: "public_data"
+          path: ["read"]
+      - action: "deny"
+        scope:
+          resource: "user_data"
+          path: ["*"]
+      - action: "deny"
+        scope:
+          resource: "admin_data"
+          path: ["*"]
+
+assignments:
+  - principal: "alice"
+    role: "admin"
+    attributes:
+      department: "IT"
+      clearance: "top-secret"
+      location: "HQ"
+
+  - principal: "bob"
+    role: "user"
+    attributes:
+      department: "Engineering"
+      clearance: "confidential"
+      location: "Remote"
+
+  - principal: "charlie"
+    role: "guest"
+    attributes:
+      department: "Marketing"
+      clearance: "public"
+      location: "Branch" 

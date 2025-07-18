@@ -1,0 +1,257 @@
+# Multi-Tenant Isolation Policy
+# This policy demonstrates tenant isolation with 1000+ tenants
+# Used for Jepsen chaos testing to verify isolation guarantees
+
+metadata:
+  name: "multi-tenant-isolation"
+  version: "1.0.0"
+  description: "Multi-tenant isolation policy for chaos testing"
+  author: "Security Envelopes Team"
+  created: "2024-01-01T00:00:00Z"
+
+# Global settings
+settings:
+  max_tenants: 1000
+  isolation_level: "strict"
+  audit_logging: true
+  performance_monitoring: true
+
+# Tenant definitions for chaos testing
+tenants:
+  # Core tenants
+  - id: "tenant-admin"
+    name: "Administrator Tenant"
+    status: "active"
+    quota:
+      storage_gb: 1000
+      compute_cores: 100
+      memory_gb: 500
+      network_mbps: 10000
+      database_connections: 1000
+      cache_mb: 10000
+    namespaces:
+      - id: "admin-system"
+        name: "System Administration"
+        resource_type: "compute"
+        quota:
+          storage_gb: 100
+          compute_cores: 10
+          memory_gb: 50
+          network_mbps: 1000
+          database_connections: 100
+          cache_mb: 1000
+
+  # Test tenants for isolation verification
+  - id: "tenant-test-001"
+    name: "Test Tenant 001"
+    status: "active"
+    quota:
+      storage_gb: 10
+      compute_cores: 2
+      memory_gb: 4
+      network_mbps: 100
+      database_connections: 10
+      cache_mb: 100
+    namespaces:
+      - id: "test-001-app"
+        name: "Test Application"
+        resource_type: "compute"
+        quota:
+          storage_gb: 5
+          compute_cores: 1
+          memory_gb: 2
+          network_mbps: 50
+          database_connections: 5
+          cache_mb: 50
+
+  - id: "tenant-test-002"
+    name: "Test Tenant 002"
+    status: "active"
+    quota:
+      storage_gb: 10
+      compute_cores: 2
+      memory_gb: 4
+      network_mbps: 100
+      database_connections: 10
+      cache_mb: 100
+    namespaces:
+      - id: "test-002-app"
+        name: "Test Application"
+        resource_type: "compute"
+        quota:
+          storage_gb: 5
+          compute_cores: 1
+          memory_gb: 2
+          network_mbps: 50
+          database_connections: 5
+          cache_mb: 50
+
+# RBAC roles for multi-tenant isolation
+roles:
+  - name: "tenant-admin"
+    description: "Tenant administrator with full access to tenant resources"
+    permissions:
+      - resource: "tenant/*"
+        actions: ["read", "write", "delete", "list"]
+        conditions:
+          - attribute: "tenant_id"
+            operator: "equals"
+            value: "${principal.tenant_id}"
+      - resource: "namespace/*"
+        actions: ["read", "write", "delete", "list"]
+        conditions:
+          - attribute: "tenant_id"
+            operator: "equals"
+            value: "${principal.tenant_id}"
+      - resource: "quota/*"
+        actions: ["read", "write"]
+        conditions:
+          - attribute: "tenant_id"
+            operator: "equals"
+            value: "${principal.tenant_id}"
+
+  - name: "tenant-user"
+    description: "Regular tenant user with limited access"
+    permissions:
+      - resource: "tenant/${principal.tenant_id}"
+        actions: ["read"]
+      - resource: "namespace/*"
+        actions: ["read", "list"]
+        conditions:
+          - attribute: "tenant_id"
+            operator: "equals"
+            value: "${principal.tenant_id}"
+      - resource: "resource/*"
+        actions: ["read", "write"]
+        conditions:
+          - attribute: "namespace.tenant_id"
+            operator: "equals"
+            value: "${principal.tenant_id}"
+
+  - name: "system-monitor"
+    description: "System monitoring role for chaos testing"
+    permissions:
+      - resource: "tenant/*"
+        actions: ["read", "list"]
+      - resource: "namespace/*"
+        actions: ["read", "list"]
+      - resource: "quota/*"
+        actions: ["read"]
+      - resource: "metrics/*"
+        actions: ["read", "write"]
+
+# Isolation rules
+isolation_rules:
+  - name: "tenant-boundary"
+    description: "Strict tenant isolation - no cross-tenant access"
+    type: "deny"
+    conditions:
+      - attribute: "target_tenant_id"
+        operator: "not_equals"
+        value: "${principal.tenant_id}"
+    resources: ["*"]
+    actions: ["*"]
+
+  - name: "namespace-isolation"
+    description: "Namespace isolation within tenant"
+    type: "allow"
+    conditions:
+      - attribute: "namespace.tenant_id"
+        operator: "equals"
+        value: "${principal.tenant_id}"
+    resources: ["namespace/*"]
+    actions: ["read", "write", "delete", "list"]
+
+  - name: "resource-quota"
+    description: "Resource quota enforcement"
+    type: "allow"
+    conditions:
+      - attribute: "resource_usage"
+        operator: "less_than"
+        value: "${tenant.quota}"
+    resources: ["resource/*"]
+    actions: ["create", "write"]
+
+# Chaos testing scenarios
+chaos_scenarios:
+  - name: "network-partition"
+    description: "Simulate network partitions between nodes"
+    duration: "300s"
+    parameters:
+      partition_probability: 0.1
+      partition_duration: "30s"
+      recovery_time: "60s"
+
+  - name: "node-failure"
+    description: "Simulate node failures"
+    duration: "600s"
+    parameters:
+      failure_probability: 0.05
+      failure_duration: "120s"
+      recovery_time: "180s"
+
+  - name: "resource-exhaustion"
+    description: "Simulate resource exhaustion attacks"
+    duration: "900s"
+    parameters:
+      exhaustion_rate: 0.2
+      target_resources: ["memory", "storage", "network"]
+
+  - name: "cross-tenant-attack"
+    description: "Simulate cross-tenant access attempts"
+    duration: "1200s"
+    parameters:
+      attack_frequency: 0.3
+      attack_types: ["data_access", "resource_creation", "quota_bypass"]
+
+# Monitoring and alerting
+monitoring:
+  metrics:
+    - name: "tenant_isolation_violations"
+      type: "counter"
+      description: "Number of tenant isolation violations"
+      alert_threshold: 0
+
+    - name: "cross_tenant_access_attempts"
+      type: "counter"
+      description: "Number of cross-tenant access attempts"
+      alert_threshold: 0
+
+    - name: "quota_exceeded_events"
+      type: "counter"
+      description: "Number of quota exceeded events"
+      alert_threshold: 10
+
+    - name: "namespace_isolation_breaches"
+      type: "counter"
+      description: "Number of namespace isolation breaches"
+      alert_threshold: 0
+
+  alerts:
+    - name: "isolation_violation"
+      condition: "tenant_isolation_violations > 0"
+      severity: "critical"
+      action: "immediate_shutdown"
+
+    - name: "quota_exceeded"
+      condition: "quota_exceeded_events > 100"
+      severity: "warning"
+      action: "throttle_requests"
+
+# Performance benchmarks
+benchmarks:
+  - name: "isolation_check_latency"
+    target: "< 1ms"
+    measurement: "p95"
+
+  - name: "tenant_creation_throughput"
+    target: "> 100 tenants/second"
+    measurement: "ops/sec"
+
+  - name: "cross_tenant_denial_rate"
+    target: "100%"
+    measurement: "percentage"
+
+  - name: "resource_quota_enforcement"
+    target: "100%"
+    measurement: "percentage" 
