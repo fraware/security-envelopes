@@ -3,8 +3,8 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Lean](https://img.shields.io/badge/Lean-4.0+-blue.svg)](https://leanprover.github.io/)
 [![Rust](https://img.shields.io/badge/Rust-1.70+-orange.svg)](https://www.rust-lang.org/)
-[![Security](https://img.shields.io/badge/Security-Audited-green.svg)](https://github.com/security-envelopes/security)
-[![Coverage](https://img.shields.io/badge/Coverage-95%25-brightgreen.svg)](https://github.com/security-envelopes/actions/workflows/ci.yml)
+[![Security](https://img.shields.io/badge/Security-Audited-green.svg)](https://github.com/SentinelOps-Remote-CI/security-envelopes/security)
+[![Coverage](https://img.shields.io/badge/Coverage-95%25-brightgreen.svg)](https://github.com/SentinelOps-Remote-CI/security-envelopes/security/actions/workflows/ci.yml)
 
 **Formally verified deployment-boundary guarantees: RBAC, tenant isolation, SGX/SEV attestation, and compliance artifact generation with machine-checked proofs.**
 
@@ -87,7 +87,7 @@ Security Envelopes provides a framework for proving and enforcing deployment-bou
 
 ```bash
 # Clone the repository
-git clone https://github.com/security-envelopes.git
+git clone https://github.com/SentinelOps-Remote-CI/security-envelopes/security.git
 
 # Install Lean
 curl https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh -sSf | sh
